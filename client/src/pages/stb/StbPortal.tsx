@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Plus, X, Zap, CheckCircle, ToggleLeft, ToggleRight, AlertTriangle, Download } from 'lucide-react';
-import { api, fmt, fmtDate } from '../../api.js';
-import { Badge, Modal, AIPanel, KeyNotice } from '../../components/ui.jsx';
-import { useApp } from '../../context/AppContext.jsx';
+import { api, fmt, fmtDate } from '../../api';
+import { Badge, Modal, AIPanel, KeyNotice } from '../../components/ui';
+import { useApp } from '../../context/AppContext';
 
 const MODULES = [
   {key:'contacts',label:'Kunden & CRM'},

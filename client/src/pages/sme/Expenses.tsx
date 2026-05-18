@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Upload, Camera, Zap, Check, X, Eye } from 'lucide-react';
-import { api, fmt, fmtDate } from '../../api.js';
-import { Badge, Modal, Empty } from '../../components/ui.jsx';
-import { useLang } from '../../context/LangContext.jsx';
-import { useApp } from '../../context/AppContext.jsx';
+import { api, fmt, fmtDate } from '../../api';
+import { Badge, Modal, Empty } from '../../components/ui';
+import { useLang } from '../../context/LangContext';
+import { useApp } from '../../context/AppContext';
 
 const CATS_DE = ['Büromaterial','Fahrtkosten','Telekommunikation','Marketing','Miete','Versicherung','Software','Personal','Sonstiges'];
 const CATS_EN = ['Office supplies','Travel','Telecommunications','Marketing','Rent','Insurance','Software','Personnel','Other'];
@@ -32,7 +32,7 @@ function ReceiptUploadModal({ expense, onClose, onDone, apiKey, lang }) {
       // Convert image to base64 for Claude
       const base64 = await new Promise((res, rej) => {
         const r = new FileReader();
-        r.onload = () => res(r.result.split(',')[1]);
+        r.onload = () => res(String(r.result).split(',')[1]);
         r.onerror = rej;
         r.readAsDataURL(file);
       });

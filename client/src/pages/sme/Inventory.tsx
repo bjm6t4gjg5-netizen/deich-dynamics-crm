@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, ArrowDown, ArrowUp, Package, AlertTriangle } from 'lucide-react';
-import { api, fmt, fmtDate } from '../../api.js';
-import { Modal, Empty } from '../../components/ui.jsx';
+import { api, fmt, fmtDate } from '../../api';
+import { Modal, Empty } from '../../components/ui';
 
 export default function Inventory() {
   const [data,setData]       = useState({ items:[], allMovements:[] });

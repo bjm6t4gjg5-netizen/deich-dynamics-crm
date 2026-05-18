@@ -1,12 +1,23 @@
 /**
- * brand.js — Single source of truth for product naming and default theming.
+ * brand.ts — Single source of truth for product naming and default theming.
  *
  * Every visible string and default color in the app reads from here. Swap
  * values in this file to white-label the product; no other code changes
  * required.
  */
 
-export const BRAND = {
+export interface Brand {
+  readonly name: string;
+  readonly product: string;
+  readonly company: string;
+  readonly tagline: string;
+  readonly domain: string;
+  readonly website: string;
+  readonly primary: string;
+  readonly accent: string;
+}
+
+export const BRAND: Brand = {
   name:    'Deich Dynamics',
   product: 'Deich Dynamics CRM',
   company: 'Deich Dynamics Solutions',

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit2, CheckCircle, ToggleLeft, ToggleRight } from 'lucide-react';
-import { api, fmt } from '../../api.js';
-import { Badge, Modal } from '../../components/ui.jsx';
+import { api, fmt } from '../../api';
+import { Badge, Modal } from '../../components/ui';
 
 const MODULES = [
   {key:'contacts',label:'Kunden & CRM'},

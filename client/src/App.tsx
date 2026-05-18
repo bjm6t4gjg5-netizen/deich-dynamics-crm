@@ -1,26 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { useApp } from './context/AppContext.jsx';
-import { useLang } from './context/LangContext.jsx';
-import { TourButton } from './components/Tour.jsx';
-import { BRAND } from './brand.js';
-import Login from './pages/Login.jsx';
+import { useApp } from './context/AppContext';
+import { useLang } from './context/LangContext';
+import { TourButton } from './components/Tour';
+import { BRAND } from './brand';
+import Login from './pages/Login';
 
 // Admin
-import AdminPortal from './pages/admin/AdminPortal.jsx';
+import AdminPortal from './pages/admin/AdminPortal';
 
 // StB
-import StbPortal    from './pages/stb/StbPortal.jsx';
-import StbSettings  from './pages/stb/StbSettings.jsx';
+import StbPortal    from './pages/stb/StbPortal';
+import StbSettings  from './pages/stb/StbSettings';
 
 // SME
-import Dashboard    from './pages/sme/Dashboard.jsx';
-import Customers    from './pages/sme/Customers.jsx';
-import Invoices     from './pages/sme/Invoices.jsx';
-import Inventory    from './pages/sme/Inventory.jsx';
-import Appearance   from './pages/sme/Appearance.jsx';
-import Settings     from './pages/sme/Settings.jsx';
-import Expenses from './pages/sme/Expenses.jsx';
-import { Pipeline, AIChat } from './pages/sme/OtherPages.jsx';
+import Dashboard    from './pages/sme/Dashboard';
+import Customers    from './pages/sme/Customers';
+import Invoices     from './pages/sme/Invoices';
+import Inventory    from './pages/sme/Inventory';
+import Appearance   from './pages/sme/Appearance';
+import Settings     from './pages/sme/Settings';
+import Expenses from './pages/sme/Expenses';
+import { Pipeline, AIChat } from './pages/sme/OtherPages';
 
 import {
   LayoutDashboard, Users, TrendingUp, FileText, Receipt, Package, Zap,

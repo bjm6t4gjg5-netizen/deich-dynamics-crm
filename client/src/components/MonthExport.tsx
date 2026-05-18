@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Download } from 'lucide-react';
-import { STORAGE } from '../api.js';
+import { STORAGE } from '../api';
 
 export function MonthExportButton() {
   const [month, setMonth]   = useState(() => {

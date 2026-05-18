@@ -1,8 +1,8 @@
 import { useState, useRef } from 'react';
 import { Save, CheckCircle, Upload, Sun, Moon } from 'lucide-react';
-import { api, STORAGE } from '../../api.js';
-import { useApp } from '../../context/AppContext.jsx';
-import { BRAND } from '../../brand.js';
+import { api, STORAGE } from '../../api';
+import { useApp } from '../../context/AppContext';
+import { BRAND } from '../../brand';
 
 const PRESETS = [
   // Deich Dynamics — house defaults

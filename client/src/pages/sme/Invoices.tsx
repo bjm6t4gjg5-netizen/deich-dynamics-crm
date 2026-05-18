@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Plus, Send, Bell, CheckCircle, X, Search, Eye, Download, Edit2, FileText } from 'lucide-react';
-import { api, fmt, fmtDate } from '../../api.js';
-import { Badge, Modal } from '../../components/ui.jsx';
+import { api, fmt, fmtDate } from '../../api';
+import { Badge, Modal } from '../../components/ui';
 
 const STATUSES = ['Alle','Entwurf','Offen','Bezahlt','Überfällig','Storniert'];
 

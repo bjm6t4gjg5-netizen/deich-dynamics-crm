@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, ArrowRight, ArrowLeft, CheckCircle } from 'lucide-react';
-import { BRAND } from '../brand.js';
+import { BRAND } from '../brand';
 
 const TOURS = {
 

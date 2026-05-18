@@ -1,13 +1,18 @@
 import { useState, useEffect } from 'react';
 import { Plus, X, Search, Users, Phone, Mail, MapPin, Link, Paperclip, FileText } from 'lucide-react';
-import { api, fmt, fmtDate } from '../../api.js';
-import { Badge, Modal, Empty } from '../../components/ui.jsx';
+import { api, fmt, fmtDate } from '../../api';
+import { Badge, Modal, Empty } from '../../components/ui';
 
 const STATUS_OPTS = ['Aktiv','Lead','Warm','Inaktiv'];
 const TYPE_OPTS   = ['Kunde','Interessent','Partner','Lieferant','Inaktiv'];
 const GROUP_OPTS  = ['Handel','Bau','IT','Beratung','Handwerk','Gesundheit','Sonstiges'];
 
-function CustomerModal({ id, all, onClose, onNavigate }) {
+function CustomerModal({ id, all, onClose, onNavigate }: {
+  id: string;
+  all: any[];
+  onClose: () => void;
+  onNavigate?: (page: string, ...args: any[]) => void;
+}) {
   const [data, setData] = useState(null);
   const load = () => api.sme.customer(id).then(setData);
   useEffect(() => { load(); }, [id]);

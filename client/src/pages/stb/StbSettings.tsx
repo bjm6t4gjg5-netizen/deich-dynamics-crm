@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Save, CheckCircle, Eye, EyeOff } from 'lucide-react';
-import { api } from '../../api.js';
-import { useApp } from '../../context/AppContext.jsx';
+import { api } from '../../api';
+import { useApp } from '../../context/AppContext';
 
 export default function StbSettings() {
   const { profile, refreshProfile } = useApp();

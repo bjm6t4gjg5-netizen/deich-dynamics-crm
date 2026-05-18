@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { Save, CheckCircle, Eye, EyeOff, Link, Download } from 'lucide-react';
-import { api } from '../../api.js';
-import { useApp } from '../../context/AppContext.jsx';
-import { MonthExportButton } from '../../components/MonthExport.jsx';
+import { api } from '../../api';
+import { useApp } from '../../context/AppContext';
+import { MonthExportButton } from '../../components/MonthExport';
 
 export default function Settings() {
   const { apiKey, setApiKey, user, profile, refreshProfile } = useApp();

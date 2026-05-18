@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { api, STORAGE } from '../api.js';
-import { BRAND } from '../brand.js';
+import { api, STORAGE } from '../api';
+import { BRAND } from '../brand';
 
 const Ctx = createContext(null);
 

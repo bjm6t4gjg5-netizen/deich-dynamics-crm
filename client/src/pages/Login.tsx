@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { useApp } from '../context/AppContext.jsx';
-import { api, STORAGE } from '../api.js';
-import { BRAND } from '../brand.js';
+import React, { useState } from 'react';
+import { useApp } from '../context/AppContext';
+import { api, STORAGE } from '../api';
+import { BRAND } from '../brand';
 import { Shield, BarChart3, Building2, Sparkles } from 'lucide-react';
 
 /**
@@ -184,7 +184,12 @@ export default function Login() {
   );
 }
 
-function Field({ label, hint, required, children }) {
+function Field({ label, hint, required, children }: {
+  label: string;
+  hint?: string;
+  required?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <div className="form-group">
       <label className="form-label">

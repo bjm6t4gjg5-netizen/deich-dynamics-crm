@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { FileText, Users, TrendingUp, Package, Receipt, ArrowRight, AlertTriangle } from 'lucide-react';
-import { api, fmt, fmtDate } from '../../api.js';
-import { Badge } from '../../components/ui.jsx';
+import { api, fmt, fmtDate } from '../../api';
+import { Badge } from '../../components/ui';
 
 export default function Dashboard({ onNavigate }) {
   const [data, setData] = useState(null);

@@ -1,7 +1,10 @@
+# Only files that would bloat the build context.
+# IMPORTANT: client/dist is intentionally NOT listed — although it's gitignored
+# locally, if it ever exists on the build host we want it included rather than
+# silently filtered out (Docker COPY would otherwise miss it).
+
 node_modules
 **/node_modules
-client/dist
-server/dist
 .git
 .github
 *.db
@@ -13,6 +16,5 @@ server/dist
 .env.local
 .env.*.local
 .DS_Store
-README.md
-*.md
-server/uploads
+server/uploads/*
+!server/uploads/.gitkeep

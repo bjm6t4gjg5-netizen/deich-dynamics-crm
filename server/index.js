@@ -11,6 +11,7 @@ const cors    = require('cors');
 const helmet  = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path    = require('path');
+const fs      = require('fs');
 
 const config = require('./config');
 const { errorHandler } = require('./middleware/errors');
@@ -93,10 +94,40 @@ app.get('/api/health', (_, res) =>
 // ── Static frontend (production) ─────────────────────────────────────────────
 if (config.isProd) {
   const dist = path.join(__dirname, '../client/dist');
+  const indexFile = path.join(dist, 'index.html');
+  const indexExists = fs.existsSync(indexFile);
+
+  // Loud startup diagnostic — when the build/deploy goes wrong, this is the
+  // single most useful line in the logs. Lists the contents of dist so we can
+  // immediately tell whether Vite produced the bundle and whether the COPY
+  // step in the Dockerfile actually delivered it to the runtime container.
+  if (indexExists) {
+    let assets = [];
+    try { assets = fs.readdirSync(path.join(dist, 'assets')); } catch { /* ignore */ }
+    // eslint-disable-next-line no-console
+    console.log(`[static] dist=${dist}  index=ok  assets=${assets.length}`);
+  } else {
+    // eslint-disable-next-line no-console
+    console.error(
+      `[static] ⚠️  ${indexFile} MISSING — frontend will 500.\n` +
+      `         Check the Docker build: did 'npm run build' run, did the COPY\n` +
+      `         step copy /app/client/dist into the runtime container?`
+    );
+  }
+
   app.use(express.static(dist));
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(dist, 'index.html'));
+    if (!indexExists) {
+      return res
+        .status(503)
+        .type('text/plain')
+        .send(
+          'Frontend assets are not present in the container.\n' +
+          'Check the deploy build logs for client/dist creation errors.'
+        );
+    }
+    res.sendFile(indexFile);
   });
 }
 

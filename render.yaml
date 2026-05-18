@@ -1,36 +1,30 @@
-# Render Blueprint — single web service that serves both API and built frontend.
+# Render Blueprint — Docker-runtime deploy.
+#
+# Why Docker instead of Render's native Node runtime?
+#   Native Node syncs only git-tracked files from build → runtime container.
+#   `client/dist/` is in .gitignore, so it never reaches the runtime container
+#   even though `npm run build` produces it. Building inside Docker via
+#   explicit COPY steps sidesteps this — the image contains exactly what we
+#   tell it to contain, .gitignore is irrelevant.
 #
 # Deploy steps (one-time):
-#  1. Create a new "Blueprint" deployment in Render, point it at this repo.
-#  2. Render auto-detects render.yaml and provisions the service below.
-#  3. After first deploy, set JWT_SECRET in the Environment tab to a strong
-#     random value (see server/.env.example for a generator command).
-#  4. Trigger a manual deploy. The service runs `db/init.js` once which seeds
-#     the demo accounts.
-#
-# A free Render service spins down after inactivity — fine for live demos.
-# For production move it to a paid plan and attach a Render Disk (mounted at
-# /var/data) so deich.db and /uploads survive deploys.
+#   1. Render → New → Blueprint → connect this repo → Apply.
+#   2. After first deploy, set CLIENT_URL to your Render URL.
+#   3. Trigger a manual redeploy (Settings → Manual Deploy → "Deploy latest").
 
 services:
   - type: web
     name: deich-dynamics-crm
-    runtime: node
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     plan: free
     region: frankfurt
-    rootDir: .
-    buildCommand: |
-      set -e
-      cd client && npm install --no-audit --no-fund && npm run build && cd ..
-      cd server && npm install --no-audit --no-fund && cd ..
-      cd server && node db/init.js || true
-    startCommand: cd server && node index.js
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 10000
+        value: 8080
       - key: JWT_SECRET
         generateValue: true
       - key: CLIENT_URL

@@ -35,4 +35,7 @@ EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -q -O- http://localhost:8080/api/health || exit 1
 
-CMD ["node", "server/index.js"]
+# init.js is idempotent — it detects an existing superadmin and skips re-seeding.
+# Safe to run on every container start; the first boot seeds demo data, later
+# boots are a no-op.
+CMD ["sh", "-c", "node /app/server/db/init.js || true && exec node /app/server/index.js"]

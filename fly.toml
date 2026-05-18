@@ -1,0 +1,41 @@
+# fly.toml — Deich Dynamics CRM
+#
+# Deploy with:  fly launch --no-deploy   (first time, picks up this file)
+#               fly secrets set JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")
+#               fly secrets set CLIENT_URL=https://<your-app>.fly.dev
+#               fly volumes create deich_data --size 1 --region fra
+#               fly deploy
+
+app = "deich-dynamics-crm"
+primary_region = "fra"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/api/health"
+
+[[mounts]]
+  source = "deich_data"
+  destination = "/data"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 256

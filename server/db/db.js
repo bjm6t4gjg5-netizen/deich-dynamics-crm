@@ -22,10 +22,17 @@ const { Database } = require('node-sqlite3-wasm');
 const fs   = require('fs');
 const path = require('path');
 
-const NEW_PATH    = path.join(__dirname, '../deich.db');
+// In production with a persistent volume (Fly.io), set DB_PATH=/data/deich.db.
+// Locally the default sibling path keeps dev convenience.
+const ENV_PATH    = process.env.DB_PATH;
+const NEW_PATH    = ENV_PATH || path.join(__dirname, '../deich.db');
 const LEGACY_PATH = path.join(__dirname, '../kontor.db');
 
 function resolveDbPath() {
+  if (ENV_PATH) {
+    try { fs.mkdirSync(path.dirname(ENV_PATH), { recursive: true }); } catch { /* ignore */ }
+    return ENV_PATH;
+  }
   if (fs.existsSync(NEW_PATH)) return NEW_PATH;
   if (fs.existsSync(LEGACY_PATH)) return LEGACY_PATH;
   return NEW_PATH;
@@ -61,10 +68,30 @@ function wrap(raw) {
 
 function getDb() {
   if (!_db) {
-    const raw = new Database(resolveDbPath());
-    _db = wrap(raw);
+    _db = wrap(openWithPragmas(resolveDbPath()));
   }
   return _db;
 }
 
-module.exports = { getDb, now };
+/**
+ * Opens a SQLite connection with sane concurrency defaults.
+ *
+ *  - busy_timeout FIRST (before anything else can fail with SQLITE_BUSY).
+ *  - journal_mode = WAL  → one writer, many concurrent readers.
+ *  - synchronous = NORMAL → durable enough for an app like this, much faster.
+ *
+ * Shared with init.js so the very first writer (the seed script) opens the
+ * DB in WAL mode too — otherwise we get a mixed-mode file and Node hangs on
+ * "database is locked" on the next start.
+ */
+function openWithPragmas(dbPath) {
+  const raw = new Database(dbPath);
+  raw.exec('PRAGMA busy_timeout = 30000');
+  try { raw.exec('PRAGMA journal_mode = WAL'); } catch { /* readonly fs */ }
+  try { raw.exec('PRAGMA synchronous = NORMAL'); } catch { /* ignore */ }
+  return raw;
+}
+
+module.exports.openWithPragmas = openWithPragmas;
+
+module.exports = { getDb, now, openWithPragmas };

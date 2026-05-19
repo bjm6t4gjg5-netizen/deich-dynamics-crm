@@ -7,23 +7,32 @@
  * Run: node db/init.js
  */
 
-const { Database } = require('node-sqlite3-wasm');
 const bcrypt = require('bcryptjs');
 const { v4: uuid } = require('uuid');
 const path = require('path');
 const fs   = require('fs');
 
 const config = require('../config');
+const { openWithPragmas } = require('./db');
 
-const DB_PATH    = path.join(__dirname, '../deich.db');
+const ENV_PATH   = process.env.DB_PATH;
+const DB_PATH    = ENV_PATH || path.join(__dirname, '../deich.db');
 const LEGACY_PATH = path.join(__dirname, '../kontor.db');
+
+if (ENV_PATH) {
+  try { fs.mkdirSync(path.dirname(ENV_PATH), { recursive: true }); } catch { /* ignore */ }
+}
 
 // If a legacy db exists and no new one, keep using legacy so existing
 // dev environments don't lose state. Otherwise create deich.db.
-const ACTIVE_PATH =
-  fs.existsSync(LEGACY_PATH) && !fs.existsSync(DB_PATH) ? LEGACY_PATH : DB_PATH;
+const ACTIVE_PATH = ENV_PATH
+  ? ENV_PATH
+  : (fs.existsSync(LEGACY_PATH) && !fs.existsSync(DB_PATH) ? LEGACY_PATH : DB_PATH);
 
-const db = new Database(ACTIVE_PATH);
+// Open with the SAME pragmas the server uses — otherwise we end up with a
+// mixed-mode file (init.js writes in rollback-journal mode, server expects
+// WAL) which causes "database is locked" the next time the app starts.
+const db = openWithPragmas(ACTIVE_PATH);
 
 // ── Schema ───────────────────────────────────────────────────────────────────
 db.exec(`

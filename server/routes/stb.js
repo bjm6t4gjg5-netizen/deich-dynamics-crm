@@ -110,8 +110,37 @@ router.get('/clients/:id', stbAuth, asyncHandler(async (req, res) => {
 
   const invoices = db.all('SELECT * FROM invoices WHERE unternehmen_id = ? ORDER BY created_at DESC LIMIT 20', [req.params.id]);
   const expenses = db.all('SELECT * FROM expenses WHERE unternehmen_id = ? ORDER BY created_at DESC LIMIT 20', [req.params.id]);
+  const notes    = db.all('SELECT * FROM client_notes WHERE unternehmen_id = ? ORDER BY created_at DESC', [req.params.id]);
 
-  res.json({ client, invoices, expenses });
+  res.json({ client, invoices, expenses, notes });
+}));
+
+// POST /api/stb/clients/:id/notes — internal note from Steuerberater
+router.post('/clients/:id/notes', stbAuth, asyncHandler(async (req, res) => {
+  const db    = getDb();
+  const stbId = getStbId(req.user.id);
+  const client = db.get('SELECT id FROM unternehmen WHERE id = ? AND stb_id = ?', [req.params.id, stbId]);
+  if (!client) return res.status(403).json({ error: 'Kein Zugriff' });
+
+  const text = (req.body.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'Text erforderlich' });
+
+  const { v4: uuid } = require('uuid');
+  const id = uuid();
+  db.run(
+    'INSERT INTO client_notes (id, unternehmen_id, stb_id, author_email, text, created_at) VALUES (?,?,?,?,?,?)',
+    [id, req.params.id, stbId, req.user.email, text, ts()]
+  );
+  res.status(201).json({ id });
+}));
+
+router.delete('/clients/:id/notes/:noteId', stbAuth, asyncHandler(async (req, res) => {
+  const db    = getDb();
+  const stbId = getStbId(req.user.id);
+  const client = db.get('SELECT id FROM unternehmen WHERE id = ? AND stb_id = ?', [req.params.id, stbId]);
+  if (!client) return res.status(403).json({ error: 'Kein Zugriff' });
+  db.run('DELETE FROM client_notes WHERE id = ? AND unternehmen_id = ?', [req.params.noteId, req.params.id]);
+  res.json({ ok: true });
 }));
 
 // POST /api/stb/clients  — create new Unternehmen under this StB

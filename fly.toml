@@ -15,6 +15,7 @@ primary_region = "fra"
 [env]
   NODE_ENV = "production"
   PORT = "8080"
+  DB_PATH = "/data/deich.db"
 
 [http_service]
   internal_port = 8080

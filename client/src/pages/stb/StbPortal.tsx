@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, X, Zap, CheckCircle, ToggleLeft, ToggleRight, AlertTriangle, Download } from 'lucide-react';
+import { Plus, X, Zap, CheckCircle, ToggleLeft, ToggleRight, AlertTriangle, Trash2, MessageSquare } from 'lucide-react';
 import { api, fmt, fmtDate } from '../../api';
 import { Badge, Modal, AIPanel, KeyNotice } from '../../components/ui';
 import { useApp } from '../../context/AppContext';
@@ -13,14 +13,30 @@ const MODULES = [
   {key:'ai',label:'KI-Assistent'},
 ];
 
-function ClientModal({client,onClose,apiKey}) {
-  const [tab,setTab]         = useState('overview');
-  const [detail,setDetail]   = useState(null);
+function ClientModal({client,onClose,apiKey}: any) {
+  const [tab,setTab]         = useState<'overview'|'invoices'|'expenses'|'modules'|'notes'|'ai'>('overview');
+  const [detail,setDetail]   = useState<any>(null);
   const [mods,setMods]       = useState(() => { try { return JSON.parse(client.modules||'{}'); } catch { return {}; } });
   const [aiResult,setAiResult] = useState('');
   const [aiLoading,setAiLoading] = useState(false);
+  const [noteDraft, setNoteDraft] = useState('');
 
-  useEffect(() => { api.stb.client(client.id).then(setDetail); }, [client.id]);
+  const reload = () => api.stb.client(client.id).then(setDetail);
+  useEffect(() => { reload(); }, [client.id]);
+
+  const addNote = async () => {
+    if (!noteDraft.trim()) return;
+    try {
+      await api.post(`/stb/clients/${client.id}/notes`, { text: noteDraft.trim() });
+      setNoteDraft('');
+      reload();
+    } catch (e: any) { alert(e.message); }
+  };
+  const removeNote = async (noteId: string) => {
+    if (!confirm('Notiz löschen?')) return;
+    try { await api.delete(`/stb/clients/${client.id}/notes/${noteId}`); reload(); }
+    catch (e: any) { alert(e.message); }
+  };
 
   const saveMods = async () => {
     try { await api.stb.setModules(client.id, mods); alert('Gespeichert!'); }
@@ -57,9 +73,9 @@ function ClientModal({client,onClose,apiKey}) {
         </div>
 
         <div style={{display:'flex',overflowX:'auto',borderBottom:'1px solid var(--border2)'}}>
-          {['overview','invoices','expenses','modules','ai'].map(t=>(
+          {(['overview','invoices','expenses','modules','notes','ai'] as const).map(t=>(
             <button key={t} className={`tab${tab===t?' active':''}`} onClick={()=>setTab(t)}>
-              {{overview:'Übersicht',invoices:'Rechnungen',expenses:'Belege',modules:'Module',ai:'KI-Analyse'}[t]}
+              {({overview:'Übersicht',invoices:'Rechnungen',expenses:'Belege',modules:'Module',notes:`Notizen${detail?.notes?.length?` (${detail.notes.length})`:''}`,ai:'KI-Analyse'} as any)[t]}
             </button>
           ))}
         </div>
@@ -120,6 +136,52 @@ function ClientModal({client,onClose,apiKey}) {
               </div>
             ))}
             <button className="btn btn-primary mt-2" onClick={saveMods}><CheckCircle size={13}/>Speichern</button>
+          </div>
+        )}
+
+        {tab==='notes' && (
+          <div className="modal-body">
+            <p className="sm muted" style={{marginBottom:14,lineHeight:1.7}}>
+              Interne Notizen zu diesem Mandanten — nur für die Kanzlei sichtbar. Ideal für Mandantengespräche, Termine, To-Dos.
+            </p>
+            <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:14}}>
+              {detail?.notes?.length === 0 && (
+                <p className="muted sm" style={{padding:'12px 0'}}>Noch keine Notizen.</p>
+              )}
+              {(detail?.notes || []).map((n: any) => (
+                <div key={n.id} style={{
+                  background:'var(--bg)',border:'1px solid var(--border)',
+                  borderRadius:'var(--r)',padding:'10px 14px',
+                  display:'flex',gap:10,alignItems:'flex-start',
+                }}>
+                  <MessageSquare size={14} color="var(--ink3)" style={{marginTop:2,flexShrink:0}}/>
+                  <div style={{flex:1}}>
+                    <div className="sm" style={{whiteSpace:'pre-wrap',lineHeight:1.6}}>{n.text}</div>
+                    <div className="muted" style={{fontSize:11,marginTop:6}}>
+                      {n.author_email} · {fmtDate(n.created_at)}
+                    </div>
+                  </div>
+                  <button className="btn btn-ghost btn-sm" style={{color:'var(--danger)'}} onClick={() => removeNote(n.id)}>
+                    <Trash2 size={12}/>
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <textarea
+                className="form-textarea"
+                rows={2}
+                style={{flex:1}}
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                placeholder="Neue Notiz — z.B. „Letztes Gespräch am 12.5., Mandant möchte für Q3 quartalsweise abrechnen"
+                onKeyDown={(e) => (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) && addNote()}
+              />
+              <button className="btn btn-primary" onClick={addNote} disabled={!noteDraft.trim()} style={{alignSelf:'flex-end'}}>
+                <Plus size={13}/>Hinzufügen
+              </button>
+            </div>
+            <p className="form-hint" style={{marginTop:6}}>Tipp: Cmd/Ctrl+Enter speichert</p>
           </div>
         )}
 

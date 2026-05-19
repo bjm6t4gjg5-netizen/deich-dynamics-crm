@@ -18,10 +18,10 @@ export interface Brand {
 }
 
 export const BRAND: Brand = {
-  name:    'Deich Dynamics',
-  product: 'Deich Dynamics CRM',
+  name:    'Mein Dynamics',
+  product: 'Mein Dynamics',
   company: 'Deich Dynamics Solutions',
-  tagline: 'Buchhaltung & CRM aus St. Peter-Ording',
+  tagline: 'Buchhaltung & CRM für deutsche KMU. Aus St. Peter-Ording.',
   domain:  'deich-dynamics.com',
   website: 'https://deich-dynamics.com',
   primary: '#1d3f36',

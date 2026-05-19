@@ -26,16 +26,18 @@ export function Modal({
   children,
   footer,
   large,
+  xl,
 }: {
   title: ReactNode;
   onClose: () => void;
   children?: ReactNode;
   footer?: ReactNode;
   large?: boolean;
+  xl?: boolean;
 }) {
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`modal${large ? ' modal-lg' : ''}`}>
+      <div className={`modal${xl ? ' modal-xl' : large ? ' modal-lg' : ''}`}>
         <div className="modal-hd">
           <span className="modal-title">{title}</span>
           <button className="modal-close" onClick={onClose}><X size={18} /></button>

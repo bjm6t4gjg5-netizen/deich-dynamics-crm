@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, Edit2, CheckCircle, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Trash2, Edit2, CheckCircle, ToggleLeft, ToggleRight, Save } from 'lucide-react';
 import { api, fmt } from '../../api';
 import { Badge, Modal } from '../../components/ui';
 
@@ -147,10 +147,14 @@ export default function AdminPortal() {
       )}
 
       <div className="tabs">
-        {[['overview','Übersicht'],['stb','Steuerberater'],['sme','Unternehmen'],['commissions','Provisionen']].map(([v,l]) => (
+        {[['overview','Übersicht'],['stb','Steuerberater'],['sme','Unternehmen'],['commissions','Provisionen'],['stats','Statistiken'],['tickets','Tickets'],['audit','Audit-Log']].map(([v,l]) => (
           <button key={v} className={`tab${tab===v?' active':''}`} onClick={()=>setTab(v)}>{l}</button>
         ))}
       </div>
+
+      {tab==='audit' && <AuditLogTab/>}
+      {tab==='stats' && <UsageStatsTab/>}
+      {tab==='tickets' && <TicketsAdminTab/>}
 
       {tab==='stb' && (
         <div className="card">
@@ -262,6 +266,241 @@ export default function AdminPortal() {
       {showCreateStb && <CreateStbModal onClose={()=>setShowCreateStb(false)} onDone={()=>{setShowCreateStb(false);load();}}/>}
       {editStb && <EditStbModal stb={editStb} onClose={()=>setEditStb(null)} onDone={()=>{setEditStb(null);load();}}/>}
       {editSme && <EditSmeModal sme={editSme} stbs={stbs} onClose={()=>setEditSme(null)} onDone={()=>{setEditSme(null);load();}}/>}
+    </div>
+  );
+}
+
+function AuditLogTab() {
+  const [entries, setEntries] = useState<any[]>([]);
+  const [search, setSearch]   = useState('');
+  const loadEntries = (q='') => api.get<any[]>(`/admin/audit${q?`?search=${encodeURIComponent(q)}`:''}`).then(setEntries).catch(()=>setEntries([]));
+  useEffect(()=>{ loadEntries(); }, []);
+
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">Audit-Log ({entries.length})</span>
+        <div style={{display:'flex',gap:8}}>
+          <input className="form-input" style={{width:220,fontSize:12}} placeholder="Action / Email / Ref-ID…"
+            value={search} onChange={(e)=>setSearch(e.target.value)}
+            onKeyDown={(e)=>e.key==='Enter'&&loadEntries(search)}/>
+          <button className="btn btn-secondary btn-sm" onClick={()=>loadEntries(search)}>Suchen</button>
+        </div>
+      </div>
+      <div className="tbl-wrap" style={{maxHeight:'70vh',overflowY:'auto'}}>
+        <table>
+          <thead><tr><th>Zeit</th><th>Aktion</th><th>User</th><th>Ref</th><th>IP</th><th>Meta</th></tr></thead>
+          <tbody>
+            {entries.map((e:any)=>(
+              <tr key={e.id}>
+                <td className="muted sm" style={{whiteSpace:'nowrap'}}>{e.created_at}</td>
+                <td className="bold sm">{e.action}</td>
+                <td className="muted sm">{e.user_email||'–'}</td>
+                <td className="muted sm">{e.ref_type ? `${e.ref_type}:${(e.ref_id||'').slice(0,8)}` : '–'}</td>
+                <td className="muted sm">{e.ip || '–'}</td>
+                <td className="muted sm" style={{maxWidth:300,overflow:'hidden',textOverflow:'ellipsis'}}>{e.meta || '–'}</td>
+              </tr>
+            ))}
+            {entries.length===0 && <tr><td colSpan={6} className="muted sm" style={{textAlign:'center',padding:24}}>Keine Audit-Einträge.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Usage-Statistiken ────────────────────────────────────────────────────────
+function UsageStatsTab() {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState<any>(null);
+  useEffect(() => {
+    api.get(`/admin/usage/summary?days=${days}`).then(setData).catch(() => setData(null));
+  }, [days]);
+
+  if (!data) return <div className="muted sm" style={{ padding: 30, textAlign: 'center' }}>Lade Statistiken…</div>;
+
+  const maxDaily = Math.max(1, ...data.daily_active.map((d: any) => d.events));
+  return (
+    <div>
+      <div className="card mb-3">
+        <div className="card-body" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span className="bold sm">Zeitraum</span>
+          {[7, 30, 90, 365].map((d) => (
+            <button key={d} className={`btn btn-sm ${days === d ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setDays(d)}>
+              {d === 365 ? 'Letztes Jahr' : `${d} Tage`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="stats-grid" style={{ marginBottom: 18 }}>
+        <div className="stat"><div className="stat-label">Aktive Nutzer ({days}d)</div><div className="stat-value">{data.active_users} / {data.total_users}</div></div>
+        <div className="stat"><div className="stat-label">Events gesamt</div><div className="stat-value">{data.total_events.toLocaleString('de-DE')}</div></div>
+        <div className="stat"><div className="stat-label">Pro aktivem User</div><div className="stat-value">{data.active_users > 0 ? Math.round(data.total_events / data.active_users) : 0}</div></div>
+        <div className="stat"><div className="stat-label">Top-Feature</div><div className="stat-value" style={{ fontSize: 18 }}>{data.top_features[0]?.event_name || '–'}</div></div>
+      </div>
+
+      <div className="grid-2" style={{ alignItems: 'flex-start' }}>
+        <div className="card">
+          <div className="card-header"><span className="card-title">Top Features (Klicks)</span></div>
+          <div className="card-body">
+            {data.top_features.length === 0 ? (
+              <p className="muted sm">Noch keine Events erfasst.</p>
+            ) : data.top_features.map((f: any, i: number) => {
+              const max = data.top_features[0].count;
+              return (
+                <div key={f.event_name} style={{ marginBottom: 8 }}>
+                  <div className="fb" style={{ marginBottom: 3, fontSize: 12 }}>
+                    <span>{i + 1}. {f.event_name}</span>
+                    <span className="bold">{f.count.toLocaleString('de-DE')}</span>
+                  </div>
+                  <div style={{ height: 6, background: 'var(--bg2)', borderRadius: 3 }}>
+                    <div style={{ height: '100%', width: `${(f.count / max) * 100}%`, background: 'var(--primary)', borderRadius: 3 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header"><span className="card-title">Tägliche Aktivität</span></div>
+          <div className="card-body">
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 140 }}>
+              {data.daily_active.map((d: any) => (
+                <div key={d.day} title={`${d.day}: ${d.users} Nutzer, ${d.events} Events`} style={{ flex: 1, background: 'var(--primary)', height: `${(d.events / maxDaily) * 100}%`, minHeight: 2, borderRadius: '2px 2px 0 0' }} />
+              ))}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 10, color: 'var(--ink3)' }}>
+              <span>{data.daily_active[0]?.day || ''}</span>
+              <span>{data.daily_active[data.daily_active.length - 1]?.day || ''}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-header"><span className="card-title">Top-Nutzer</span></div>
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>E-Mail</th><th>Rolle</th><th>Events</th><th>Zuletzt aktiv</th></tr></thead>
+            <tbody>
+              {data.top_users.map((u: any) => (
+                <tr key={u.email}>
+                  <td className="bold sm">{u.email}</td>
+                  <td><Badge status={u.role === 'unternehmen' ? 'Aktiv' : u.role === 'steuerberater' ? 'Warm' : 'Lead'} text={u.role} /></td>
+                  <td>{u.events.toLocaleString('de-DE')}</td>
+                  <td className="muted sm">{new Date(u.last_seen).toLocaleString('de-DE')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-header"><span className="card-title">Aktivität nach Rolle</span></div>
+        <div className="card-body">
+          {data.by_role.map((r: any) => (
+            <div key={r.role} className="fb" style={{ padding: '8px 0', borderBottom: '1px dotted var(--border2)' }}>
+              <span className="bold sm">{r.role}</span>
+              <span className="muted sm">{r.users} Nutzer · {r.events.toLocaleString('de-DE')} Events</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Support-Tickets ──────────────────────────────────────────────────────────
+function TicketsAdminTab() {
+  const [tickets, setTickets] = useState<any[]>([]);
+  const [selected, setSelected] = useState<any>(null);
+  const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('open');
+
+  const load = () => api.get<any[]>('/tickets').then(setTickets).catch(() => setTickets([]));
+  useEffect(() => { load(); }, []);
+
+  const visible = tickets.filter((t) => filter === 'all' || (filter === 'open' ? t.status !== 'closed' : t.status === 'closed'));
+
+  return (
+    <div>
+      <div className="card mb-3">
+        <div className="card-header">
+          <span className="card-title">Support-Tickets ({visible.length})</span>
+          <div style={{ display: 'flex', gap: 0, border: '1px solid var(--border)', borderRadius: 'var(--r)', overflow: 'hidden' }}>
+            {(['open', 'closed', 'all'] as const).map((f) => (
+              <button key={f} onClick={() => setFilter(f)} style={{ padding: '6px 12px', border: 'none', cursor: 'pointer', background: filter === f ? 'var(--primary)' : 'transparent', color: filter === f ? '#fff' : 'var(--ink3)', fontSize: 12 }}>
+                {f === 'open' ? 'Offen' : f === 'closed' ? 'Geschlossen' : 'Alle'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="tbl-wrap">
+          <table>
+            <thead><tr><th>Datum</th><th>Nutzer</th><th>Rolle</th><th>Betreff</th><th>Kategorie</th><th>Priorität</th><th>Status</th></tr></thead>
+            <tbody>
+              {visible.map((t) => (
+                <tr key={t.id} className="clickable" onClick={() => setSelected(t)}>
+                  <td className="muted sm">{new Date(t.created_at).toLocaleString('de-DE')}</td>
+                  <td className="bold sm">{t.user_email}</td>
+                  <td className="sm">{t.role}</td>
+                  <td className="bold sm">{t.subject}</td>
+                  <td><span className="badge badge-neu">{t.category}</span></td>
+                  <td>{t.priority === 'high' ? '🔴 Hoch' : t.priority === 'low' ? '🟢 Niedrig' : '🟡 Normal'}</td>
+                  <td><Badge status={t.status === 'open' ? 'Offen' : t.status === 'in_progress' ? 'Warm' : 'Bezahlt'} text={t.status} /></td>
+                </tr>
+              ))}
+              {visible.length === 0 && <tr><td colSpan={7} className="muted sm" style={{ textAlign: 'center', padding: 24 }}>Keine Tickets.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {selected && (
+        <Modal title={`Ticket: ${selected.subject}`} large onClose={() => setSelected(null)}
+          footer={<>
+            <button className="btn btn-secondary" onClick={() => setSelected(null)}>Schließen</button>
+            <button className="btn btn-primary" onClick={async () => {
+              try {
+                await api.put(`/tickets/${selected.id}`, {
+                  status: selected.status,
+                  admin_note: selected.admin_note,
+                  priority: selected.priority,
+                });
+                load(); setSelected(null);
+              } catch (e: any) { alert(e.message); }
+            }}><Save size={13} />Speichern</button>
+          </>}>
+          <div className="muted sm" style={{ marginBottom: 14 }}>Von <strong>{selected.user_email}</strong> · {new Date(selected.created_at).toLocaleString('de-DE')}</div>
+          <div style={{ padding: 12, background: 'var(--bg)', borderRadius: 'var(--r)', whiteSpace: 'pre-wrap', fontSize: 13, lineHeight: 1.6, marginBottom: 14 }}>
+            {selected.body}
+          </div>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Status</label>
+              <select className="form-select" value={selected.status} onChange={(e) => setSelected({ ...selected, status: e.target.value })}>
+                <option value="open">Offen</option>
+                <option value="in_progress">In Bearbeitung</option>
+                <option value="closed">Geschlossen</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Priorität</label>
+              <select className="form-select" value={selected.priority} onChange={(e) => setSelected({ ...selected, priority: e.target.value })}>
+                <option value="low">Niedrig</option>
+                <option value="normal">Normal</option>
+                <option value="high">Hoch</option>
+              </select>
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Interne Notiz (für Admin-Team)</label>
+            <textarea className="form-textarea" rows={3} value={selected.admin_note || ''} onChange={(e) => setSelected({ ...selected, admin_note: e.target.value })} />
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

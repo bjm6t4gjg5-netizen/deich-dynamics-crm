@@ -66,7 +66,11 @@ const config = Object.freeze({
 
   mail: {
     fromDefault:     process.env.MAIL_FROM_DEFAULT     || 'noreply@deich-dynamics.com',
-    fromNameDefault: process.env.MAIL_FROM_NAME_DEFAULT || 'Deich Dynamics CRM',
+    fromNameDefault: process.env.MAIL_FROM_NAME_DEFAULT || 'Mein Dynamics',
+    // AES-256 key for encrypting per-tenant IMAP/SMTP passwords at rest.
+    // Rotate via Settings → Sicherheit. Lose this and stored passwords become
+    // unrecoverable.
+    encKey: process.env.MAIL_ENC_KEY || null,
   },
 
   seed: {

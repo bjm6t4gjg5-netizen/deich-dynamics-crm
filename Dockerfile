@@ -34,5 +34,8 @@ EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s CMD wget -q -O- http://localhost:8080/api/health || exit 1
 
-# init.js is idempotent — skips re-seed if a superadmin already exists.
-CMD ["sh", "-c", "node /app/server/db/init.js || true && exec node /app/server/index.js"]
+# On Fly.io a persistent volume is mounted at /data.
+# Migrate the uploads directory there at startup so logos, receipts and item
+# images survive deploys. init.js is idempotent — skips re-seed if a superadmin
+# already exists.
+CMD ["sh", "-c", "mkdir -p /data/uploads && if [ ! -L /app/server/uploads ]; then rm -rf /app/server/uploads && ln -s /data/uploads /app/server/uploads; fi && node /app/server/db/init.js || true && exec node /app/server/index.js"]

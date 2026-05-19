@@ -126,9 +126,13 @@ router.delete('/customers/:id', smeAuth, asyncHandler(async (req, res) => {
 }));
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
+// Default: filter out soft-deleted; query ?include_deleted=1 to include them
 router.get('/invoices', smeAuth, asyncHandler(async (req, res) => {
   const smeId = getSmeId(req.user.id);
-  res.json(getDb().all('SELECT * FROM invoices WHERE unternehmen_id=? ORDER BY created_at DESC', [smeId]));
+  const sql = req.query.include_deleted === '1'
+    ? 'SELECT * FROM invoices WHERE unternehmen_id=? ORDER BY created_at DESC'
+    : 'SELECT * FROM invoices WHERE unternehmen_id=? AND deleted_at IS NULL ORDER BY created_at DESC';
+  res.json(getDb().all(sql, [smeId]));
 }));
 
 router.post('/invoices', smeAuth, asyncHandler(async (req, res) => {
@@ -136,10 +140,14 @@ router.post('/invoices', smeAuth, asyncHandler(async (req, res) => {
   const smeId = getSmeId(req.user.id);
   const sme   = db.get('SELECT * FROM unternehmen WHERE id=?', [smeId]);
 
-  const { customer_id, client_name, description, net, vat_rate, due_date, notes, line_items } = req.body;
-  if (!client_name || net === undefined) return res.status(400).json({ error: 'client_name und net erforderlich' });
+  const { customer_id, client_name, description, net, vat_rate, due_date, notes, line_items, from_deal_id } = req.body;
+  if (!client_name) return res.status(400).json({ error: 'client_name erforderlich' });
 
-  const netNum  = parseFloat(net) || 0;
+  // Prefer computed totals from line_items; fall back to scalar net for legacy
+  const items = Array.isArray(line_items) ? line_items : [];
+  const netNum = items.length
+    ? items.reduce((s, it) => s + ((parseFloat(it.qty) || 0) * (parseFloat(it.unit_price) || 0)), 0)
+    : (parseFloat(net) || 0);
   const vatRate = parseInt(vat_rate || sme.vat_rate || 19);
   const vatNum  = netNum * vatRate / 100;
   const gross   = netNum + vatNum;
@@ -159,26 +167,46 @@ router.post('/invoices', smeAuth, asyncHandler(async (req, res) => {
      JSON.stringify(line_items||[]),netNum,vatNum,gross,vatRate,
      'Entwurf',ts().slice(0,10),due_date||null,notes||null,ts()]);
 
+  // If this invoice was created from a pipeline deal, link them so the deal
+  // shows "Rechnung öffnen" instead of "Rechnung erstellen" next time.
+  if (from_deal_id) {
+    try { db.run('UPDATE deals SET invoice_id = ? WHERE id = ? AND unternehmen_id = ?', [id, from_deal_id, smeId]); } catch { /* ignore */ }
+  }
+
   res.status(201).json({ id, invoice_number: invNum });
 }));
 
 router.put('/invoices/:id', smeAuth, asyncHandler(async (req, res) => {
   const db    = getDb();
   const smeId = getSmeId(req.user.id);
-  const { status, paid_at, description, notes } = req.body;
+  const { status, paid_at, description, notes, line_items, client_name, vat_rate, due_date } = req.body;
   const inv = db.get('SELECT * FROM invoices WHERE id=? AND unternehmen_id=?', [req.params.id, smeId]);
   if (!inv) return res.status(404).json({ error: 'Nicht gefunden' });
 
-  db.run('UPDATE invoices SET status=?, paid_at=?, description=?, notes=? WHERE id=?',
-    [status || inv.status, paid_at || inv.paid_at, description || inv.description, notes || inv.notes, req.params.id]);
+  // Recompute totals from line_items if provided.
+  let { net, vat, gross, vat_rate: invVatRate, line_items: invItems } = inv;
+  if (Array.isArray(line_items)) {
+    const items = line_items;
+    net = items.reduce((s, it) => s + ((parseFloat(it.qty) || 0) * (parseFloat(it.unit_price) || 0)), 0);
+    invVatRate = parseInt(vat_rate || inv.vat_rate || 19);
+    vat = net * invVatRate / 100;
+    gross = net + vat;
+    invItems = JSON.stringify(items);
+  }
 
-  // If paid, deduct inventory for linked items
+  db.run(`UPDATE invoices SET status=?, paid_at=?, description=?, notes=?, client_name=?,
+    line_items=?, net=?, vat=?, gross=?, vat_rate=?, due_date=? WHERE id=?`,
+    [status || inv.status, paid_at || inv.paid_at, description ?? inv.description, notes ?? inv.notes,
+     client_name ?? inv.client_name, invItems, net, vat, gross, invVatRate, due_date ?? inv.due_date,
+     req.params.id]);
+
+  // If paid, deduct inventory for linked items (skip unlimited items)
   if (status === 'Bezahlt' && inv.status !== 'Bezahlt') {
-    const items = JSON.parse(inv.line_items || '[]');
+    const items = JSON.parse(invItems || '[]');
     items.forEach(item => {
       if (item.inventory_id && item.qty) {
         const it = db.get('SELECT * FROM inventory_items WHERE id=? AND unternehmen_id=?', [item.inventory_id, smeId]);
-        if (it) {
+        if (it && !it.is_unlimited) {
           db.run('UPDATE inventory_items SET stock = stock - ? WHERE id=?', [item.qty, item.inventory_id]);
           db.run('INSERT INTO inventory_movements (id,item_id,invoice_id,type,qty,note,moved_at) VALUES (?,?,?,?,?,?,?)',
             [uuid(), item.inventory_id, req.params.id, 'Ausgang', item.qty, `Rechnung ${inv.invoice_number}`, ts()]);
@@ -189,9 +217,66 @@ router.put('/invoices/:id', smeAuth, asyncHandler(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/** Soft-Delete:
+ *  - Noch nicht versendet → einfach löschen (Status 'Gelöscht', deleted_at gesetzt).
+ *  - Bereits versendet → erfordert `reason` im Request-Body. Wird auch gelöscht,
+ *    aber der Grund wird festgehalten (gobd-konform).
+ *  In beiden Fällen werden verknüpfte Deals/Abos vom invoice_id losgelöst,
+ *  damit aus Angebot/Abo eine neue Rechnung erzeugt werden kann.
+ *  Der Datensatz bleibt in der DB (Soft-Delete) und wird in normalen Listen
+ *  ausgeblendet. */
 router.delete('/invoices/:id', smeAuth, asyncHandler(async (req, res) => {
+  const db    = getDb();
   const smeId = getSmeId(req.user.id);
-  getDb().run('UPDATE invoices SET status=? WHERE id=? AND unternehmen_id=?', ['Storniert', req.params.id, smeId]);
+  const inv   = db.get('SELECT * FROM invoices WHERE id=? AND unternehmen_id=?', [req.params.id, smeId]);
+  if (!inv) return res.status(404).json({ error: 'Nicht gefunden' });
+
+  // Reason kann aus Query oder Body kommen — Body bevorzugt
+  const reason = (req.body?.reason || req.query?.reason || '').toString().slice(0, 240);
+  if (inv.sent_at && !reason.trim()) {
+    return res.status(400).json({
+      error: 'Diese Rechnung wurde bereits versendet — bitte einen Grund für die Löschung angeben.',
+      code: 'reason_required',
+    });
+  }
+
+  // Soft-Delete: nur Flag setzen — Status bleibt erhalten, damit der CHECK
+  // constraint nicht aufschlägt und alte Auswertungen weiterhin stimmen.
+  db.run(
+    'UPDATE invoices SET deleted_at=?, deletion_reason=? WHERE id=?',
+    [ts(), reason || null, inv.id]
+  );
+  // Detach linked deals so re-issuing is possible
+  db.run('UPDATE deals SET invoice_id=NULL WHERE invoice_id=?', [inv.id]);
+  // Detach recurring template's last_invoice_id and remove from generated_log
+  const recs = db.all('SELECT id, generated_log FROM recurring_invoices WHERE last_invoice_id=?', [inv.id]);
+  for (const r of recs) {
+    let log = [];
+    try { log = JSON.parse(r.generated_log || '[]'); } catch { log = []; }
+    const filtered = log.filter((l) => l.invoice_id !== inv.id);
+    db.run('UPDATE recurring_invoices SET last_invoice_id = NULL, generated_log = ? WHERE id = ?', [JSON.stringify(filtered), r.id]);
+  }
+  res.json({ ok: true, deleted: true, was_sent: !!inv.sent_at });
+}));
+
+/** Storno mit Begründung — setzt Status auf "Storniert" und legt einen
+ *  Storno-Vermerk an. Im Gegensatz zu DELETE bleibt der Original-Datensatz
+ *  für die Buchhaltung erhalten. Auch wenn ein Deal mit dieser Rechnung
+ *  verknüpft ist, wird die Verknüpfung gelöst (deals.invoice_id = NULL),
+ *  damit man später wieder neu in Rechnung umwandeln kann. */
+router.post('/invoices/:id/cancel', smeAuth, asyncHandler(async (req, res) => {
+  const db    = getDb();
+  const smeId = getSmeId(req.user.id);
+  const inv   = db.get('SELECT * FROM invoices WHERE id=? AND unternehmen_id=?', [req.params.id, smeId]);
+  if (!inv) return res.status(404).json({ error: 'Nicht gefunden' });
+  if (inv.status === 'Storniert') return res.json({ ok: true, already: true });
+  const reason = (req.body?.reason || '').slice(0, 240);
+  db.run(
+    'UPDATE invoices SET status=?, cancelled_at=?, cancellation_reason=? WHERE id=?',
+    ['Storniert', ts(), reason, req.params.id]
+  );
+  // Detach from any linked deal so the user can re-issue an invoice from the deal later
+  db.run('UPDATE deals SET invoice_id=NULL WHERE invoice_id=?', [req.params.id]);
   res.json({ ok: true });
 }));
 
@@ -271,9 +356,28 @@ router.post('/expenses', smeAuth, asyncHandler(async (req, res) => {
 router.put('/expenses/:id', smeAuth, asyncHandler(async (req, res) => {
   const db    = getDb();
   const smeId = getSmeId(req.user.id);
-  const { status, has_receipt } = req.body;
-  db.run('UPDATE expenses SET status=?, has_receipt=? WHERE id=? AND unternehmen_id=?',
-    [status, has_receipt ? 1 : 0, req.params.id, smeId]);
+  const exp   = db.get('SELECT * FROM expenses WHERE id=? AND unternehmen_id=?', [req.params.id, smeId]);
+  if (!exp) return res.status(404).json({ error: 'Nicht gefunden' });
+
+  const { status, has_receipt, supplier, description, category, net, vat_rate, expense_date } = req.body;
+  const netNum  = net !== undefined ? parseFloat(net) || 0 : exp.net;
+  const vatRate = vat_rate !== undefined ? parseInt(vat_rate) || 19 : exp.vat_rate;
+  const vatNum  = netNum * vatRate / 100;
+
+  db.run(`UPDATE expenses SET
+    supplier=?, description=?, category=?, net=?, vat=?, gross=?, vat_rate=?,
+    status=?, has_receipt=?, expense_date=?
+    WHERE id=? AND unternehmen_id=?`,
+    [supplier ?? exp.supplier, description ?? exp.description, category ?? exp.category,
+     netNum, vatNum, netNum + vatNum, vatRate,
+     status ?? exp.status, has_receipt !== undefined ? (has_receipt ? 1 : 0) : exp.has_receipt,
+     expense_date ?? exp.expense_date, req.params.id, smeId]);
+  res.json({ ok: true });
+}));
+
+router.delete('/expenses/:id', smeAuth, asyncHandler(async (req, res) => {
+  const smeId = getSmeId(req.user.id);
+  getDb().run('DELETE FROM expenses WHERE id=? AND unternehmen_id=?', [req.params.id, smeId]);
   res.json({ ok: true });
 }));
 
@@ -295,22 +399,48 @@ router.get('/inventory', smeAuth, asyncHandler(async (req, res) => {
 router.post('/inventory', smeAuth, asyncHandler(async (req, res) => {
   const db    = getDb();
   const smeId = getSmeId(req.user.id);
-  const { sku, name, description, category, unit, stock, min_stock, buy_price, sell_price, supplier } = req.body;
+  const { sku, name, description, category, unit, stock, min_stock, buy_price, sell_price, supplier, is_unlimited } = req.body;
   if (!name) return res.status(400).json({ error: 'Name erforderlich' });
+
+  const unlimited = is_unlimited ? 1 : 0;
   const id = uuid();
   db.run(`INSERT INTO inventory_items
-    (id,unternehmen_id,sku,name,description,category,unit,stock,min_stock,buy_price,sell_price,supplier,created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [id,smeId,sku||'',name,description||'',category||'Sonstiges',unit||'Stück',
-     parseFloat(stock)||0,parseFloat(min_stock)||0,
-     parseFloat(buy_price)||0,parseFloat(sell_price)||0,supplier||'',ts()]);
+    (id,unternehmen_id,sku,name,description,category,unit,stock,min_stock,buy_price,sell_price,supplier,is_unlimited,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, smeId, sku||'', name, description||'', category||'Sonstiges', unit||'Stück',
+     unlimited ? 0 : (parseFloat(stock) || 0),
+     unlimited ? 0 : (parseFloat(min_stock) || 0),
+     parseFloat(buy_price)||0, parseFloat(sell_price)||0, supplier||'',
+     unlimited, ts()]);
 
-  // Record initial stock as Eingang if stock > 0
-  if (parseFloat(stock) > 0) {
+  // Record initial stock as Eingang only for limited items
+  if (!unlimited && parseFloat(stock) > 0) {
     db.run('INSERT INTO inventory_movements (id,item_id,type,qty,unit_cost,note,moved_at) VALUES (?,?,?,?,?,?,?)',
-      [uuid(),id,'Eingang',parseFloat(stock),parseFloat(buy_price)||0,'Anfangsbestand',ts()]);
+      [uuid(), id, 'Eingang', parseFloat(stock), parseFloat(buy_price)||0, 'Anfangsbestand', ts()]);
   }
   res.status(201).json({ id });
+}));
+
+router.put('/inventory/:id', smeAuth, asyncHandler(async (req, res) => {
+  const db    = getDb();
+  const smeId = getSmeId(req.user.id);
+  const item  = db.get('SELECT * FROM inventory_items WHERE id=? AND unternehmen_id=?', [req.params.id, smeId]);
+  if (!item) return res.status(404).json({ error: 'Nicht gefunden' });
+
+  const { name, description, category, unit, min_stock, buy_price, sell_price, supplier, is_unlimited } = req.body;
+  const unlimited = is_unlimited !== undefined ? (is_unlimited ? 1 : 0) : item.is_unlimited;
+  db.run(`UPDATE inventory_items SET name=?, description=?, category=?, unit=?, min_stock=?, buy_price=?, sell_price=?, supplier=?, is_unlimited=? WHERE id=?`,
+    [name ?? item.name, description ?? item.description, category ?? item.category, unit ?? item.unit,
+     unlimited ? 0 : (parseFloat(min_stock) ?? item.min_stock),
+     parseFloat(buy_price) ?? item.buy_price, parseFloat(sell_price) ?? item.sell_price,
+     supplier ?? item.supplier, unlimited, req.params.id]);
+  res.json({ ok: true });
+}));
+
+router.delete('/inventory/:id', smeAuth, asyncHandler(async (req, res) => {
+  const smeId = getSmeId(req.user.id);
+  getDb().run('DELETE FROM inventory_items WHERE id=? AND unternehmen_id=?', [req.params.id, smeId]);
+  res.json({ ok: true });
 }));
 
 router.post('/inventory/:id/move', smeAuth, asyncHandler(async (req, res) => {
@@ -341,23 +471,111 @@ router.get('/deals', smeAuth, asyncHandler(async (req, res) => {
 router.post('/deals', smeAuth, asyncHandler(async (req, res) => {
   const db    = getDb();
   const smeId = getSmeId(req.user.id);
-  const { name, customer_id, company, value, probability, stage, contact_person, expected_close, notes } = req.body;
+  const { name, customer_id, company, value, probability, stage, contact_person, expected_close, notes, line_items, campaign_id } = req.body;
   if (!name) return res.status(400).json({ error: 'Name erforderlich' });
+
+  const items = Array.isArray(line_items) ? line_items : [];
+  // Auto-compute deal value from items if items exist
+  const computedValue = items.length
+    ? items.reduce((s, it) => s + ((parseFloat(it.qty) || 0) * (parseFloat(it.unit_price) || 0)), 0)
+    : (parseFloat(value) || 0);
+
   const id = uuid();
-  db.run(`INSERT INTO deals (id,unternehmen_id,customer_id,name,company,value,probability,stage,contact_person,expected_close,notes,created_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [id,smeId,customer_id||null,name,company||'',parseFloat(value)||0,
-     parseInt(probability)||20,stage||'Erstgespräch',contact_person||'',expected_close||null,notes||'',ts()]);
+  db.run(`INSERT INTO deals (id,unternehmen_id,customer_id,name,company,value,probability,stage,contact_person,expected_close,notes,line_items,campaign_id,stage_entered_at,created_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [id, smeId, customer_id || null, name, company || '', computedValue,
+     parseInt(probability) || 20, stage || 'Erstgespräch', contact_person || '', expected_close || null,
+     notes || '', JSON.stringify(items), campaign_id || null, ts(), ts()]);
   res.status(201).json({ id });
 }));
 
 router.put('/deals/:id', smeAuth, asyncHandler(async (req, res) => {
   const db    = getDb();
   const smeId = getSmeId(req.user.id);
-  const { stage, probability, value, notes } = req.body;
-  db.run('UPDATE deals SET stage=?, probability=?, value=?, notes=? WHERE id=? AND unternehmen_id=?',
-    [stage, probability, value, notes, req.params.id, smeId]);
+  const existing = db.get('SELECT * FROM deals WHERE id = ? AND unternehmen_id = ?', [req.params.id, smeId]);
+  if (!existing) return res.status(404).json({ error: 'Nicht gefunden' });
+
+  const { stage, probability, value, notes, campaign_id, contact_person, expected_close, line_items } = req.body;
+
+  // Track stage transitions in history so we can show "wie lange in Phase X"
+  let history = [];
+  try { history = JSON.parse(existing.stage_history || '[]'); } catch { history = []; }
+  let stageEnteredAt = existing.stage_entered_at;
+  if (stage && stage !== existing.stage) {
+    history.push({ stage: existing.stage, leftAt: ts() });
+    history.push({ stage, enteredAt: ts() });
+    stageEnteredAt = ts();
+  }
+
+  const itemsJson = Array.isArray(line_items) ? JSON.stringify(line_items) : existing.line_items;
+  db.run(`UPDATE deals SET
+      stage=COALESCE(?,stage),
+      probability=COALESCE(?,probability),
+      value=COALESCE(?,value),
+      notes=COALESCE(?,notes),
+      campaign_id=COALESCE(?,campaign_id),
+      contact_person=COALESCE(?,contact_person),
+      expected_close=COALESCE(?,expected_close),
+      line_items=?,
+      stage_history=?,
+      stage_entered_at=?
+    WHERE id=? AND unternehmen_id=?`,
+    [stage ?? null, probability ?? null, value ?? null, notes ?? null,
+     campaign_id ?? null, contact_person ?? null, expected_close ?? null,
+     itemsJson,
+     JSON.stringify(history), stageEnteredAt,
+     req.params.id, smeId]);
   res.json({ ok: true });
+}));
+
+/** Reset / Demo-Reseed —
+ *  Löscht ALLE Geschäftsdaten dieses Unternehmens (Kunden, Rechnungen,
+ *  Belege, Inventar, Deals, Angebote, Abos, Closings, Aktivitäten) und
+ *  spielt frische Demo-Daten ein. Der Unternehmens-Account selbst,
+ *  Pipeline-Stages, Mahnstufen und Mail-Einstellungen bleiben erhalten.
+ *  Body: `{ confirm: 'RESET' }` als Sicherheit. */
+router.post('/reset-demo-data', smeAuth, asyncHandler(async (req, res) => {
+  const db    = getDb();
+  const smeId = getSmeId(req.user.id);
+  if (!smeId) return res.status(404).json({ error: 'Kein Unternehmen' });
+  if (req.body?.confirm !== 'RESET') {
+    return res.status(400).json({ error: 'Confirm-Token fehlt — Body muss { confirm: "RESET" } enthalten.' });
+  }
+
+  // Wipe Geschäftsdaten (nicht: unternehmen, pipeline_stages, dunning_levels, customer_groups, campaigns)
+  // Order matters because of FK references (movements → items, etc.)
+  const wipeTables = [
+    'inventory_movements', 'inventory_items',
+    'activities', 'client_notes', 'email_log',
+    'deals',
+    'invoices',
+    'expenses',
+    'quotes',
+    'recurring_invoices',
+    'monthly_closings',
+    'customer_files',
+    'customers',
+  ];
+  const wipedPer = {};
+  for (const t of wipeTables) {
+    try {
+      const before = db.get(`SELECT COUNT(*) AS c FROM ${t} WHERE unternehmen_id = ?`, [smeId])?.c || 0;
+      db.run(`DELETE FROM ${t} WHERE unternehmen_id = ?`, [smeId]);
+      wipedPer[t] = before;
+    } catch (e) { wipedPer[t] = `error: ${e.message}`; }
+  }
+
+  // Seed fresh demo data — surface any error to the client so it isn't silent
+  let seeded;
+  try {
+    const seed = require('../db/seed-sme-demo');
+    seeded = seed(db, smeId);
+  } catch (e) {
+    console.error('[reset-demo-data] Seed failed:', e);
+    return res.status(500).json({ ok: false, error: 'Seed-Fehler: ' + e.message, wiped: wipedPer, stack: e.stack });
+  }
+
+  res.json({ ok: true, wiped: wipedPer, seeded });
 }));
 
 // ── Dashboard stats ───────────────────────────────────────────────────────────
@@ -371,7 +589,7 @@ router.get('/dashboard', smeAuth, asyncHandler(async (req, res) => {
   const customers= db.get('SELECT COUNT(*) as c FROM customers WHERE unternehmen_id=?', [smeId]);
   const pipeline = db.get('SELECT COALESCE(SUM(value),0) as t FROM deals WHERE unternehmen_id=? AND stage != ?', [smeId,'Gewonnen']);
   const expenses = db.get('SELECT COALESCE(SUM(gross),0) as t FROM expenses WHERE unternehmen_id=?', [smeId]);
-  const lowStock = db.all('SELECT * FROM inventory_items WHERE unternehmen_id=? AND stock <= min_stock', [smeId]);
+  const lowStock = db.all('SELECT * FROM inventory_items WHERE unternehmen_id=? AND stock <= min_stock AND COALESCE(is_unlimited,0) = 0', [smeId]);
 
   const recentInvoices = db.all('SELECT * FROM invoices WHERE unternehmen_id=? ORDER BY created_at DESC LIMIT 5', [smeId]);
   const recentCustomers= db.all('SELECT * FROM customers WHERE unternehmen_id=? ORDER BY created_at DESC LIMIT 5', [smeId]);
@@ -386,6 +604,23 @@ router.get('/dashboard', smeAuth, asyncHandler(async (req, res) => {
 router.get('/emails', smeAuth, asyncHandler(async (req, res) => {
   const smeId = getSmeId(req.user.id);
   res.json(getDb().all('SELECT * FROM email_log WHERE unternehmen_id=? ORDER BY sent_at DESC LIMIT 50', [smeId]));
+}));
+
+// POST /api/sme/handover — push monthly state to Steuerberater
+router.post('/handover', smeAuth, asyncHandler(async (req, res) => {
+  const db = getDb();
+  const smeId = getSmeId(req.user.id);
+  const sme = db.get('SELECT * FROM unternehmen WHERE id = ?', [smeId]);
+  if (!sme) return res.status(404).json({ error: 'Unternehmen nicht gefunden' });
+  if (!sme.stb_id) return res.status(400).json({ error: 'Kein Steuerberater verbunden' });
+
+  const month = new Date().toISOString().slice(0, 7);
+  db.run(
+    'INSERT INTO client_notes (id, unternehmen_id, stb_id, author_email, text, created_at) VALUES (?,?,?,?,?,?)',
+    [uuid(), smeId, sme.stb_id, req.user.email,
+     `📤 Mandant hat alle Daten für ${month} zur Übergabe markiert. Bitte Monatsabschluss prüfen.`, ts()]
+  );
+  res.json({ ok: true, month });
 }));
 
 module.exports = router;
@@ -498,5 +733,30 @@ router.post('/expenses/:id/receipt', smeAuth, receiptUpload.single('receipt'), a
   if (!req.file) return res.status(400).json({ error: 'Keine Datei' });
   const url = `/uploads/receipts/${req.file.filename}`;
   db.run('UPDATE expenses SET receipt_url=?, has_receipt=? WHERE id=? AND unternehmen_id=?', [url, 1, req.params.id, smeId]);
+  res.json({ url });
+}));
+
+// ── Inventory image upload (separate dir + multer instance) ────────────────
+const imgDir = pathR.join(__dirname, '../uploads/items');
+if (!fsR.existsSync(imgDir)) fsR.mkdirSync(imgDir, { recursive: true });
+const imgStorage = multerReceipt.diskStorage({
+  destination: imgDir,
+  filename: (req, file, cb) => cb(null, `item-${Date.now()}-${Math.random().toString(36).slice(2)}${pathR.extname(file.originalname || '.png')}`),
+});
+const imgUpload = multerReceipt({
+  storage: imgStorage,
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (['image/jpeg','image/png','image/webp'].includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Nur JPG, PNG, WebP erlaubt'));
+  },
+});
+
+router.post('/inventory/:id/image', smeAuth, imgUpload.single('image'), asyncHandler(async (req, res) => {
+  const db    = getDb();
+  const smeId = getSmeId(req.user.id);
+  if (!req.file) return res.status(400).json({ error: 'Keine Datei' });
+  const url = `/uploads/items/${req.file.filename}`;
+  db.run('UPDATE inventory_items SET image_url=? WHERE id=? AND unternehmen_id=?', [url, req.params.id, smeId]);
   res.json({ url });
 }));

@@ -31,52 +31,65 @@ export default function StbSettings() {
   return (
     <div style={{maxWidth:580}}>
       <div className="tabs" style={{marginBottom:18}}>
-        {[['mail','E-Mail-Server'],['datev','DATEV'],['elster','ELSTER'],['sepa','SEPA']].map(([v,l])=>(
+        {[['datev','DATEV'],['elster','ELSTER'],['sepa','SEPA'],['mail','E-Mail-Hinweis']].map(([v,l])=>(
           <button key={v} className={`tab${tab===v?' active':''}`} onClick={()=>setTab(v)}>{l}</button>
         ))}
       </div>
 
       {tab==='mail' && (
         <div className="card">
-          <div className="card-header"><span className="card-title">E-Mail-Konfiguration</span></div>
+          <div className="card-header"><span className="card-title">E-Mail-Versand</span></div>
           <div className="card-body">
-            <div className="form-group"><label className="form-label">E-Mail-Provider</label>
-              <select className="form-select" value={mail.mail_provider} onChange={e=>setMail(m=>({...m,mail_provider:e.target.value}))}>
-                <option value="smtp">SMTP (eigener Server)</option>
-                <option value="sendgrid">SendGrid</option>
-                <option value="resend">Resend</option>
-              </select>
+            <div style={{background:'var(--info-bg)',border:'1px solid var(--info)',borderRadius:'var(--r)',padding:'14px 16px',fontSize:13,color:'var(--info)',lineHeight:1.7,marginBottom:14}}>
+              <strong>Mail-Versand wird vom Mandanten konfiguriert</strong> — nicht von der Kanzlei.
+              <p style={{marginTop:8}}>
+                Jeder Mandant hinterlegt seine eigenen Zugangsdaten (SMTP, SendGrid, Resend oder ab Phase 2 auch Gmail/Outlook). Rechnungen und Mahnungen gehen damit vom Absender des Mandanten raus — nicht der Kanzlei.
+              </p>
+              <p style={{marginTop:8}}>
+                Die Mandanten-Einstellung findest du im Mandanten-Detail unter „Module" oder im Mandanten-Login selbst unter <em>Einstellungen</em>.
+              </p>
             </div>
-
-            {mail.mail_provider==='smtp' && <>
-              <div className="form-row">
-                <div className="form-group"><label className="form-label">SMTP Host</label><input className="form-input" value={mail.mail_host} onChange={e=>setMail(m=>({...m,mail_host:e.target.value}))} placeholder="smtp.gmail.com"/></div>
-                <div className="form-group"><label className="form-label">Port</label><input className="form-input" type="number" value={mail.mail_port} onChange={e=>setMail(m=>({...m,mail_port:e.target.value}))}/></div>
-              </div>
-              <div className="form-row">
-                <div className="form-group"><label className="form-label">Benutzername</label><input className="form-input" value={mail.mail_user} onChange={e=>setMail(m=>({...m,mail_user:e.target.value}))}/></div>
-                <div className="form-group"><label className="form-label">Passwort</label>
-                  <div style={{position:'relative'}}>
-                    <input className="form-input" type={showPass?'text':'password'} value={mail.mail_pass} onChange={e=>setMail(m=>({...m,mail_pass:e.target.value}))} placeholder="Leer = unverändert" style={{paddingRight:36}}/>
-                    <button onClick={()=>setShowPass(s=>!s)} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'var(--ink3)',display:'flex'}}>
-                      {showPass?<EyeOff size={14}/>:<Eye size={14}/>}
-                    </button>
-                  </div>
+            {/* Hidden legacy form — keep state machinery around for future kanzlei-wide
+                templates, but no longer surfaced as the primary versand-route. */}
+            <details>
+              <summary className="muted sm" style={{cursor:'pointer'}}>Legacy: kanzleiweiten Default-Versender hinterlegen (selten benötigt)</summary>
+              <div style={{paddingTop:12,opacity:.8}}>
+                <div className="form-group"><label className="form-label">E-Mail-Provider</label>
+                  <select className="form-select" value={mail.mail_provider} onChange={e=>setMail(m=>({...m,mail_provider:e.target.value}))}>
+                    <option value="smtp">SMTP (eigener Server)</option>
+                    <option value="sendgrid">SendGrid</option>
+                    <option value="resend">Resend</option>
+                  </select>
                 </div>
+                {mail.mail_provider==='smtp' && <>
+                  <div className="form-row">
+                    <div className="form-group"><label className="form-label">SMTP Host</label><input className="form-input" value={mail.mail_host} onChange={e=>setMail(m=>({...m,mail_host:e.target.value}))} placeholder="smtp.gmail.com"/></div>
+                    <div className="form-group"><label className="form-label">Port</label><input className="form-input" type="number" value={mail.mail_port} onChange={e=>setMail(m=>({...m,mail_port:e.target.value}))}/></div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group"><label className="form-label">Benutzername</label><input className="form-input" value={mail.mail_user} onChange={e=>setMail(m=>({...m,mail_user:e.target.value}))}/></div>
+                    <div className="form-group"><label className="form-label">Passwort</label>
+                      <div style={{position:'relative'}}>
+                        <input className="form-input" type={showPass?'text':'password'} value={mail.mail_pass} onChange={e=>setMail(m=>({...m,mail_pass:e.target.value}))} placeholder="Leer = unverändert" style={{paddingRight:36}}/>
+                        <button onClick={()=>setShowPass(s=>!s)} style={{position:'absolute',right:8,top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'var(--ink3)',display:'flex'}}>
+                          {showPass?<EyeOff size={14}/>:<Eye size={14}/>}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="form-group"><label className="form-label">Absenderadresse (From)</label><input className="form-input" type="email" value={mail.mail_from} onChange={e=>setMail(m=>({...m,mail_from:e.target.value}))} placeholder="buchhaltung@kanzlei.de"/></div>
+                </>}
+                {mail.mail_provider==='sendgrid' && (
+                  <div className="form-group"><label className="form-label">SendGrid API-Key</label><input className="form-input" type="password" value={mail.sendgrid_key} onChange={e=>setMail(m=>({...m,sendgrid_key:e.target.value}))} placeholder="SG.xxxx"/></div>
+                )}
+                {mail.mail_provider==='resend' && (
+                  <div className="form-group"><label className="form-label">Resend API-Key</label><input className="form-input" type="password" value={mail.resend_key} onChange={e=>setMail(m=>({...m,resend_key:e.target.value}))} placeholder="re_xxxx"/></div>
+                )}
+                <button className="btn btn-primary" onClick={save}>
+                  {saved?<><CheckCircle size={14}/>Gespeichert</>:<><Save size={14}/>Speichern</>}
+                </button>
               </div>
-              <div className="form-group"><label className="form-label">Absenderadresse (From)</label><input className="form-input" type="email" value={mail.mail_from} onChange={e=>setMail(m=>({...m,mail_from:e.target.value}))} placeholder="buchhaltung@kanzlei.de"/></div>
-            </>}
-
-            {mail.mail_provider==='sendgrid' && (
-              <div className="form-group"><label className="form-label">SendGrid API-Key</label><input className="form-input" type="password" value={mail.sendgrid_key} onChange={e=>setMail(m=>({...m,sendgrid_key:e.target.value}))} placeholder="SG.xxxx"/></div>
-            )}
-            {mail.mail_provider==='resend' && (
-              <div className="form-group"><label className="form-label">Resend API-Key</label><input className="form-input" type="password" value={mail.resend_key} onChange={e=>setMail(m=>({...m,resend_key:e.target.value}))} placeholder="re_xxxx"/></div>
-            )}
-
-            <button className="btn btn-primary" onClick={save}>
-              {saved?<><CheckCircle size={14}/>Gespeichert</>:<><Save size={14}/>Speichern</>}
-            </button>
+            </details>
           </div>
         </div>
       )}

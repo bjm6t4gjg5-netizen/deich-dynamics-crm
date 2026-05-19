@@ -36,7 +36,7 @@ function token(): string | null {
   try { return localStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 
-type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 async function req<T = unknown>(method: HttpMethod, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -77,7 +77,8 @@ export const api = {
   get:    <T = unknown>(path: string)             => req<T>('GET',    path),
   post:   <T = unknown>(path: string, body?: unknown) => req<T>('POST',   path, body),
   put:    <T = unknown>(path: string, body?: unknown) => req<T>('PUT',    path, body),
-  delete: <T = unknown>(path: string)             => req<T>('DELETE', path),
+  patch:  <T = unknown>(path: string, body?: unknown) => req<T>('PATCH',  path, body),
+  delete: <T = unknown>(path: string, body?: unknown) => req<T>('DELETE', path, body),
 
   auth: {
     login:      (email: string, password: string) =>
@@ -172,10 +173,83 @@ export const api = {
   },
 };
 
-export const fmt = (n: number | null | undefined): string =>
-  new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' }).format(n || 0);
+// ── Locale & number formatting ─────────────────────────────────────────────────
+// Stored as JSON in localStorage so the user can pick the country style they
+// prefer (Germany default: 1.234,56 €). Read on every render — the cost is
+// negligible and we want changes to apply instantly across the app.
+export interface LocaleSettings {
+  locale: string;     // BCP 47 (e.g. 'de-DE', 'en-US', 'fr-FR')
+  currency: string;   // ISO 4217 (e.g. 'EUR', 'USD', 'CHF')
+}
+const LOCALE_KEY = 'dd_locale_v1';
+const DEFAULT_LOCALE: LocaleSettings = { locale: 'de-DE', currency: 'EUR' };
+
+export function getLocaleSettings(): LocaleSettings {
+  try {
+    const raw = localStorage.getItem(LOCALE_KEY);
+    if (!raw) return DEFAULT_LOCALE;
+    const parsed = JSON.parse(raw);
+    return {
+      locale: parsed.locale || DEFAULT_LOCALE.locale,
+      currency: parsed.currency || DEFAULT_LOCALE.currency,
+    };
+  } catch { return DEFAULT_LOCALE; }
+}
+export function setLocaleSettings(s: LocaleSettings): void {
+  try { localStorage.setItem(LOCALE_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+}
+
+export const fmt = (n: number | null | undefined): string => {
+  const { locale, currency } = getLocaleSettings();
+  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(n || 0);
+};
+
+/** Formats a number without currency — useful for input field display. */
+export const fmtNum = (n: number | null | undefined, decimals = 2): string => {
+  const { locale } = getLocaleSettings();
+  return new Intl.NumberFormat(locale, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(n || 0);
+};
+
+/** Parses a locale-formatted string back to a number. Accepts both
+ *  German ("1.234,56") and US ("1,234.56") style and tolerates spaces. */
+export function parseNum(s: string | null | undefined): number {
+  if (s == null) return 0;
+  const str = String(s).trim().replace(/[^\d\-,.\s]/g, '').replace(/\s/g, '');
+  if (!str) return 0;
+  // Detect decimal separator: whichever appears last is the decimal one
+  const lastComma = str.lastIndexOf(',');
+  const lastDot   = str.lastIndexOf('.');
+  let normalized: string;
+  if (lastComma === -1 && lastDot === -1) normalized = str;
+  else if (lastComma > lastDot) {
+    // German style: thousands = . , decimal = ,
+    normalized = str.replace(/\./g, '').replace(',', '.');
+  } else {
+    // US style: thousands = , , decimal = .
+    normalized = str.replace(/,/g, '');
+  }
+  const n = parseFloat(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Fire-and-forget usage tracking. Failures are swallowed so analytics
+ *  never disrupt the user flow. */
+export function track(event_name: string, event_type: 'page' | 'click' | 'action' = 'click', metadata?: Record<string, unknown>): void {
+  try {
+    fetch(`${BASE}/usage/track`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token() ? { Authorization: `Bearer ${token()}` } : {}),
+      },
+      body: JSON.stringify({ event_name, event_type, metadata }),
+      keepalive: true,
+    }).catch(() => { /* swallow */ });
+  } catch { /* swallow */ }
+}
 
 export const fmtDate = (s: string | null | undefined): string => {
   if (!s) return '–';
-  try { return new Date(s).toLocaleDateString('de-DE'); } catch { return s; }
+  const { locale } = getLocaleSettings();
+  try { return new Date(s).toLocaleDateString(locale); } catch { return s; }
 };

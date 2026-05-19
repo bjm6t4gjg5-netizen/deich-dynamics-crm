@@ -179,23 +179,42 @@ export default function Expenses() {
   const { apiKey }  = useApp();
   const CATS = lang === 'en' ? CATS_EN : CATS_DE;
 
-  const [expenses,setExpenses] = useState([]);
+  const [expenses,setExpenses] = useState<any[]>([]);
   const [showNew,setShowNew]   = useState(false);
-  const [uploadFor,setUploadFor] = useState(null); // expense to upload receipt for
-  const [form,setForm]         = useState({ supplier:'', description:'', category:'', net:'', vat_rate:'19', expense_date:'', has_receipt:false });
+  const [uploadFor,setUploadFor] = useState<any>(null); // expense to upload receipt for
+  const [editing,setEditing]   = useState<any>(null); // open edit-modal for this expense
+  const [form,setForm]         = useState<any>({ supplier:'', description:'', category:'', net:'', vat_rate:'19', expense_date:'', has_receipt:false });
+  const [newReceiptFile, setNewReceiptFile] = useState<File | null>(null);
+  const [creating, setCreating] = useState(false);
   const [err,setErr]           = useState('');
 
   const load = () => api.sme.expenses().then(setExpenses);
   useEffect(() => { load(); }, []);
 
-  const resetForm = () => setForm({ supplier:'', description:'', category:'', net:'', vat_rate:'19', expense_date:'', has_receipt:false });
+  const resetForm = () => { setForm({ supplier:'', description:'', category:'', net:'', vat_rate:'19', expense_date:'', has_receipt:false }); setNewReceiptFile(null); };
 
   const create = async () => {
-    setErr('');
+    setErr(''); setCreating(true);
     try {
-      await api.sme.createExpense({ ...form, category: form.category || CATS[0] });
+      const r = await api.sme.createExpense({ ...form, category: form.category || CATS[0], has_receipt: form.has_receipt || !!newReceiptFile });
+      // If a file was selected in the form, upload it right after creation
+      if (newReceiptFile && r?.id) {
+        const fd = new FormData();
+        fd.append('receipt', newReceiptFile);
+        const token = localStorage.getItem('dd_token');
+        const upRes = await fetch(`/api/sme/expenses/${r.id}/receipt`, {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: fd,
+        });
+        if (!upRes.ok) {
+          const e = await upRes.json().catch(() => ({}));
+          throw new Error(e.error || 'Upload fehlgeschlagen');
+        }
+      }
       setShowNew(false); resetForm(); load();
-    } catch(e) { setErr(e.message); }
+    } catch(e: any) { setErr(e.message); }
+    finally { setCreating(false); }
   };
 
   // After receipt upload with AI data — update expense fields
@@ -252,14 +271,14 @@ export default function Expenses() {
             </thead>
             <tbody>
               {expenses.map(e => (
-                <tr key={e.id}>
+                <tr key={e.id} className="clickable" onClick={() => setEditing(e)}>
                   <td className="bold sm">{e.supplier}</td>
                   <td className="muted sm">{e.description}</td>
                   <td><span className="badge badge-neu">{e.category}</span></td>
                   <td className="muted sm">{fmtDate(e.expense_date)}</td>
                   <td>{fmt(e.net)}</td>
                   <td className="bold">{fmt(e.gross)}</td>
-                  <td>
+                  <td onClick={(ev) => ev.stopPropagation()}>
                     {e.has_receipt ? (
                       <div style={{display:'flex',alignItems:'center',gap:6}}>
                         <span className="ok-c sm">✓ {t('receipt_present')}</span>
@@ -292,8 +311,8 @@ export default function Expenses() {
       {/* New expense modal */}
       {showNew && (
         <Modal title={t('new_expense')} onClose={() => { setShowNew(false); resetForm(); }} footer={<>
-          <button className="btn btn-secondary" onClick={() => { setShowNew(false); resetForm(); }}>{t('cancel')}</button>
-          <button className="btn btn-primary" onClick={create}><Plus size={13}/>{t('save')}</button>
+          <button className="btn btn-secondary" onClick={() => { setShowNew(false); resetForm(); }} disabled={creating}>{t('cancel')}</button>
+          <button className="btn btn-primary" onClick={create} disabled={creating}><Plus size={13}/>{creating ? '…' : t('save')}</button>
         </>}>
           {err && <div className="notice err">{err}</div>}
 
@@ -349,8 +368,57 @@ export default function Expenses() {
             <div className="form-group" style={{display:'flex',alignItems:'flex-end',paddingBottom:4}}>
               <label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer',fontSize:13}}>
                 <input type="checkbox" checked={form.has_receipt} onChange={e=>setForm(f=>({...f,has_receipt:e.target.checked}))} style={{width:16,height:16}}/>
-                {lang==='en'?'Receipt already available (upload later)':'Beleg vorhanden (Foto später hochladen)'}
+                {lang==='en'?'Receipt already available (upload later)':'Beleg vorhanden (kein Foto)'}
               </label>
+            </div>
+          </div>
+
+          {/* File upload directly in the create form */}
+          <div className="form-group" style={{ marginTop: 4 }}>
+            <label className="form-label">{lang==='en'?'Receipt file (optional)':'Beleg-Datei (optional)'}</label>
+            <div
+              onClick={() => document.getElementById('exp-new-file')?.click()}
+              onDragOver={(e) => { e.preventDefault(); }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const f = e.dataTransfer.files?.[0];
+                if (f) { setNewReceiptFile(f); setForm((p: any) => ({ ...p, has_receipt: true })); }
+              }}
+              style={{
+                border: '2px dashed ' + (newReceiptFile ? 'var(--ok)' : 'var(--border)'),
+                borderRadius: 'var(--r-lg)',
+                padding: 20,
+                textAlign: 'center',
+                cursor: 'pointer',
+                background: newReceiptFile ? 'rgba(5,150,105,.04)' : 'var(--bg)',
+                transition: 'all .15s',
+              }}
+            >
+              <input
+                id="exp-new-file"
+                type="file"
+                accept="image/*,application/pdf"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) { setNewReceiptFile(f); setForm((p: any) => ({ ...p, has_receipt: true })); }
+                }}
+              />
+              <Upload size={22} color={newReceiptFile ? 'var(--ok)' : 'var(--ink3)'} style={{ marginBottom: 6 }} />
+              <div className="bold sm">
+                {newReceiptFile
+                  ? <>✓ {newReceiptFile.name}</>
+                  : (lang==='en'?'Drop file or click to upload (image/PDF)':'Datei hier ablegen oder klicken (Bild/PDF)')}
+              </div>
+              {newReceiptFile && (
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ marginTop: 6 }}
+                  onClick={(e) => { e.stopPropagation(); setNewReceiptFile(null); }}
+                >
+                  Entfernen
+                </button>
+              )}
             </div>
           </div>
         </Modal>
@@ -366,6 +434,148 @@ export default function Expenses() {
           onDone={onReceiptDone}
         />
       )}
+
+      {/* Edit expense modal */}
+      {editing && (
+        <ExpenseEditModal
+          expense={editing}
+          cats={CATS}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); load(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ── Edit existing expense ───────────────────────────────────────────────
+function ExpenseEditModal({
+  expense,
+  cats,
+  onClose,
+  onSaved,
+}: {
+  expense: any;
+  cats: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    supplier: expense.supplier || '',
+    description: expense.description || '',
+    category: expense.category || cats[0],
+    net: expense.net || 0,
+    vat_rate: expense.vat_rate || 19,
+    expense_date: expense.expense_date || '',
+    status: expense.status || 'Offen',
+    has_receipt: !!expense.has_receipt,
+  });
+  const [busy, setBusy] = useState(false);
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api.sme.updateExpense(expense.id, {
+        ...form,
+        net: parseFloat(String(form.net)) || 0,
+        vat_rate: parseInt(String(form.vat_rate)) || 19,
+        has_receipt: form.has_receipt ? 1 : 0,
+      });
+      onSaved();
+    } catch (e: any) { alert(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const remove = async () => {
+    if (!confirm('Beleg endgültig löschen?')) return;
+    try { await api.delete(`/sme/expenses/${expense.id}`); onSaved(); }
+    catch (e: any) { alert(e.message); }
+  };
+
+  return (
+    <Modal
+      title={`Beleg bearbeiten: ${expense.supplier}`}
+      onClose={onClose}
+      large
+      footer={
+        <>
+          <button className="btn btn-ghost" style={{ color: 'var(--danger)' }} onClick={remove}>
+            <X size={13} />Löschen
+          </button>
+          <div style={{ flex: 1 }} />
+          <button className="btn btn-secondary" onClick={onClose}>Abbrechen</button>
+          <button className="btn btn-primary" onClick={save} disabled={busy}>
+            <Check size={13} />{busy ? 'Speichert…' : 'Speichern'}
+          </button>
+        </>
+      }
+    >
+      <div className="form-row">
+        <div className="form-group">
+          <label className="form-label">Lieferant</label>
+          <input className="form-input" value={form.supplier} onChange={(e) => setForm((f: any) => ({ ...f, supplier: e.target.value }))} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Kategorie</label>
+          <select className="form-select" value={form.category} onChange={(e) => setForm((f: any) => ({ ...f, category: e.target.value }))}>
+            {cats.map((c) => <option key={c}>{c}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="form-group">
+        <label className="form-label">Beschreibung</label>
+        <input className="form-input" value={form.description} onChange={(e) => setForm((f: any) => ({ ...f, description: e.target.value }))} />
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label className="form-label">Netto (€)</label>
+          <input className="form-input" type="number" step="0.01" value={form.net} onChange={(e) => setForm((f: any) => ({ ...f, net: e.target.value }))} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">MwSt. (%)</label>
+          <select className="form-select" value={form.vat_rate} onChange={(e) => setForm((f: any) => ({ ...f, vat_rate: +e.target.value }))}>
+            {[0, 7, 19].map((r) => <option key={r} value={r}>{r} %</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="form-row">
+        <div className="form-group">
+          <label className="form-label">Datum</label>
+          <input className="form-input" type="date" value={form.expense_date} onChange={(e) => setForm((f: any) => ({ ...f, expense_date: e.target.value }))} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Status</label>
+          <select className="form-select" value={form.status} onChange={(e) => setForm((f: any) => ({ ...f, status: e.target.value }))}>
+            {['Offen', 'Gebucht', 'Storniert'].map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+      </div>
+      <div style={{ marginTop: 14, padding: 14, background: 'var(--bg)', borderRadius: 'var(--r)', border: '1px solid var(--border)' }}>
+        <div className="bold sm" style={{ marginBottom: 10 }}>📎 Belegdatei</div>
+        {expense.receipt_url ? (
+          <div>
+            {/^https?:\/\/.+|^\//.test(expense.receipt_url) && /\.(jpg|jpeg|png|webp|gif)$/i.test(expense.receipt_url) ? (
+              <a href={expense.receipt_url} target="_blank" rel="noreferrer">
+                <img src={expense.receipt_url} alt="Beleg" style={{ maxWidth: '100%', maxHeight: 260, borderRadius: 'var(--r)', border: '1px solid var(--border)' }} />
+              </a>
+            ) : /\.pdf$/i.test(expense.receipt_url) ? (
+              <a href={expense.receipt_url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
+                📄 PDF öffnen
+              </a>
+            ) : (
+              <a href={expense.receipt_url} target="_blank" rel="noreferrer" className="btn btn-secondary btn-sm">
+                Beleg öffnen
+              </a>
+            )}
+            <p className="muted sm" style={{ marginTop: 8 }}>Beleg ist hinterlegt. Zum Ersetzen den Beleg im Belege-Tab über „Foto hochladen" austauschen.</p>
+          </div>
+        ) : (
+          <div style={{ padding: 16, textAlign: 'center', color: 'var(--ink3)' }}>
+            <div className="sm" style={{ marginBottom: 6 }}>Kein Beleg hinterlegt.</div>
+            <div className="muted sm">Beleg über den „Foto hochladen"-Button in der Liste hinzufügen (mit KI-Scan-Option).</div>
+          </div>
+        )}
+      </div>
+    </Modal>
   );
 }

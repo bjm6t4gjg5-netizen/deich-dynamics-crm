@@ -59,10 +59,10 @@ export default function Login() {
       <aside className="login-brand" aria-hidden="false">
         <div className="login-brand-inner">
           <div className="login-mark" aria-label={BRAND.product}>
-            <div className="login-mark-badge">D</div>
+            <div className="login-mark-badge">M</div>
             <div>
               <div className="login-mark-name">{BRAND.name}</div>
-              <div className="login-mark-sub">{BRAND.product}</div>
+              <div className="login-mark-sub">von {BRAND.company}</div>
             </div>
           </div>
 

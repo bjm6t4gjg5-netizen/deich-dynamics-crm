@@ -6,7 +6,7 @@
 #               fly volumes create deich_data --size 1 --region fra
 #               fly deploy
 
-app = "deich-dynamics-crm"
+app = "deich-dynamics-leon"
 primary_region = "fra"
 
 [build]

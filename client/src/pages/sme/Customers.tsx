@@ -483,7 +483,7 @@ export default function Customers({ onNavigate }: { onNavigate?: (page: string) 
       lines.push(keys.map((k) => escape(c[k])).join(';'));
     }
     // UTF-8 BOM so Excel detects encoding correctly.
-    const blob = new Blob(['﻿' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -936,7 +936,7 @@ const CSV_FIELD_MAP: Record<string, string> = {
 
 function parseCsv(text: string): Array<Record<string, string>> {
   // Strip BOM if present
-  const body = text.replace(/^﻿/, '');
+  const body = text.replace(/^\ufeff/, '');
   // Outlook/Excel use ; or , depending on locale. Detect by counting in header.
   const firstLine = body.split(/\r?\n/, 1)[0] || '';
   const sep = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ';' : ',';

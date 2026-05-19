@@ -30,13 +30,31 @@ app.use(
   })
 );
 
-// ── CORS ─────────────────────────────────────────────────────────────────────
+// ── Serve client + uploads BEFORE cors so module scripts with `crossorigin`
+//    attribute (Vite default) hit the static handler directly and don't
+//    trip the CORS rejection middleware. Browsers don't actually need CORS
+//    for same-origin requests anyway.
+const distPath = path.join(__dirname, '../client/dist');
+if (config.isProd && fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+}
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// ── CORS — for API calls from other origins ─────────────────────────────────
 app.use(
   cors({
     origin: (origin, cb) => {
-      // Same-origin (server-side, curl, etc.) → no origin header → allow
+      // Same-origin (server-side, curl, fetch w/o cross-origin) → no origin → allow
       if (!origin) return cb(null, true);
+      // Trust the configured allow-list
       if (config.cors.origins.includes(origin)) return cb(null, true);
+      // Trust any *.fly.dev origin so deploys without CLIENT_URL still work,
+      // plus localhost on any port for dev.
+      try {
+        const u = new URL(origin);
+        if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return cb(null, true);
+        if (u.hostname.endsWith('.fly.dev')) return cb(null, true);
+      } catch { /* fall through */ }
       return cb(new Error(`CORS: origin ${origin} not allowed`));
     },
     credentials: true,
@@ -45,9 +63,6 @@ app.use(
 
 // ── Body parsing ─────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
-
-// ── Static uploads (logos, receipts) ─────────────────────────────────────────
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ── Auto-migrations (idempotent — safe on every start) ───────────────────────
 try {

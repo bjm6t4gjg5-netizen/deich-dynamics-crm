@@ -1,6 +1,6 @@
 {
   "name": "deich-dynamics-crm-server",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "private": true,
   "description": "Deich Dynamics CRM — API server (Node/Express + SQLite).",
   "type": "commonjs",

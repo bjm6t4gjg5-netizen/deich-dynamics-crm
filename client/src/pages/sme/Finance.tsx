@@ -1186,7 +1186,7 @@ function ExcelImportTab({ onImported }: { onImported: () => void }) {
     setFilename(f.name);
     const text = await f.text();
     const sep = (text.split(/\r?\n/, 1)[0] || '').includes(';') ? ';' : ',';
-    const lines = text.replace(/^﻿/, '').split(/\r?\n/).filter(Boolean);
+    const lines = text.replace(/^\ufeff/, '').split(/\r?\n/).filter(Boolean);
     if (lines.length < 2) return;
     const headers = lines[0].split(sep).map((h) => h.trim().toLowerCase());
     const rows = lines.slice(1).map((line) => {

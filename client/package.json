@@ -1,6 +1,6 @@
 {
   "name": "deich-dynamics-crm-client",
-  "version": "3.2.1",
+  "version": "3.2.2",
   "private": true,
   "description": "Deich Dynamics CRM — frontend (React + Vite + TypeScript).",
   "type": "module",
